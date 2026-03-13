@@ -1,9 +1,3 @@
-"""Page scraper — fetches a URL and returns its content as markdown via crawl4ai.
-
-Uses the HTTP-only strategy (AsyncHTTPCrawlerStrategy + HTTPCrawlerConfig) so
-**no browser or Playwright installation is needed**.
-"""
-
 import asyncio
 import logging
 
@@ -32,9 +26,6 @@ FALLBACK_SELECTORS = [
 
 MIN_CONTENT_LENGTH = 200
 
-# ---------------------------------------------------------------------------
-# Shared configuration (module-level, created once)
-# ---------------------------------------------------------------------------
 _http_config = HTTPCrawlerConfig(
     method="GET",
     headers={
@@ -48,9 +39,6 @@ _http_config = HTTPCrawlerConfig(
 _http_strategy = AsyncHTTPCrawlerStrategy(browser_config=_http_config)
 
 
-# ---------------------------------------------------------------------------
-# Async public API
-# ---------------------------------------------------------------------------
 async def scrape_page(url: str, max_length: int = 50_000) -> dict:
     """Scrape *url* and return ``{"url": ..., "content": ...}``.
 
@@ -120,30 +108,4 @@ async def scrape_page(url: str, max_length: int = 50_000) -> dict:
         return {"url": url, "content": "", "error": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# Sync wrapper (safe to call from non-async contexts like Streamlit)
-# ---------------------------------------------------------------------------
-def scrape_page_sync(url: str, max_length: int = 50_000) -> dict:
-    """Synchronous wrapper around :func:`scrape_page`.
 
-    Works in Streamlit and other sync environments without subprocess
-    spawning because the HTTP strategy does not rely on Playwright.
-    """
-    try:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # Already inside an event loop (e.g. Jupyter / Streamlit).
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(asyncio.run, scrape_page(url, max_length)).result(timeout=120)
-
-        return asyncio.run(scrape_page(url, max_length))
-
-    except Exception as e:
-        logger.error("scrape_page_sync error for %s: %s", url, e)
-        return {"url": url, "content": "", "error": str(e)}
