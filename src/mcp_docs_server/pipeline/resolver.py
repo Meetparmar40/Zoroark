@@ -1,5 +1,4 @@
 """URL Resolver - First stage of the documentation retrieval pipeline.
-
 Takes a package name and returns documentation URLs via DuckDuckGo search
 and npm/PyPI registry lookups.
 """
@@ -8,12 +7,9 @@ import logging
 import re
 from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
-
 import httpx
 from pydantic import BaseModel
-
 from ..config import settings
-
 
 logger = logging.getLogger(__name__)
 

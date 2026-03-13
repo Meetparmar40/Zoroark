@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 
 import streamlit as st
 from groq import Groq
@@ -120,7 +121,6 @@ def execute_tool_call(tool_name: str, args: dict) -> str:
         ))
         return json.dumps(results, indent=2)
     elif tool_name == "scrape_page":
-        # Runs in a subprocess to avoid Playwright+Windows thread issues.
         results = scrape_page_sync(url=args["url"])
         return json.dumps(results, indent=2)
     else:
@@ -131,16 +131,18 @@ def execute_tool_call(tool_name: str, args: dict) -> str:
 # Streamlit UI
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="MCP Docs Assistant", page_icon="📚", layout="wide")
+st.set_page_config(page_title="MCP Docs Assistant", layout="wide")
 
-st.title("📚 MCP Docs Assistant")
+st.title("MCP Docs Assistant")
 st.caption("Ask about any package's documentation — powered by Groq + MCP pipeline")
 
 # Sidebar configuration
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("Configuration")
 
-    api_key = st.text_input("Groq API Key", type="password", placeholder="gsk_...")
+    api_key = st.secrets.get("GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
+    if not api_key:
+        api_key = st.text_input("Groq API Key", type="password", placeholder="gsk_...")
 
     model = st.selectbox(
         "Model",
@@ -148,17 +150,10 @@ with st.sidebar:
         format_func=lambda k: GROQ_MODELS[k],
     )
 
-    temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.1)
+    temperature = st.slider("Temperature", 0.0, 1.0, 1.0, 0.1)
 
     st.divider()
-    st.markdown("**Example prompts:**")
-    st.markdown("- How do I use `useEffect` in React?")
-    st.markdown("- Show me FastAPI dependency injection docs")
-    st.markdown("- What's new in Next.js 14?")
-    st.markdown("- How does Pydantic model validation work?")
-
-    st.divider()
-    if st.button("🗑️ Clear chat"):
+    if st.button("Clear chat"):
         st.session_state.messages = []
         st.rerun()
 
@@ -176,7 +171,7 @@ for msg in st.session_state.messages:
 # Chat input
 if prompt := st.chat_input("Ask about a package or its docs..."):
     if not api_key:
-        st.error("Please enter your Groq API key in the sidebar.")
+        st.error("Please set GROQ_API_KEY (env/secrets) or enter it in the sidebar.")
         st.stop()
 
     # Add user message
@@ -219,17 +214,17 @@ if prompt := st.chat_input("Ask about a package or its docs..."):
                 fn_name = tool_call.function.name
                 fn_args = json.loads(tool_call.function.arguments)
 
-                with st.status(f"🔧 Calling **{fn_name}**...", expanded=True) as status:
+                with st.status(f"Calling **{fn_name}**...", expanded=True) as status:
                     st.json(fn_args)
                     try:
                         tool_result = execute_tool_call(fn_name, fn_args)
                         # Show a preview of the result
                         preview = tool_result[:3000] + ("..." if len(tool_result) > 3000 else "")
                         st.code(preview, language="json")
-                        status.update(label=f"✅ **{fn_name}** complete", state="complete")
+                        status.update(label=f"**{fn_name}** complete", state="complete")
                     except Exception as e:
                         tool_result = json.dumps({"error": str(e)})
-                        status.update(label=f"❌ **{fn_name}** failed", state="error")
+                        status.update(label=f"**{fn_name}** failed", state="error")
                         st.error(str(e))
 
                 # Feed the tool result back to the model

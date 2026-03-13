@@ -1,14 +1,20 @@
 """MCP Documentation Server — exposes resolve_docs and scrape_page tools."""
 
 from typing import Optional
-
 from fastmcp import FastMCP
 
-from .pipeline.resolver import URLResolver
-from .pipeline.scraper import scrape_page as _scrape_page
+try:
+    from .pipeline.resolver import URLResolver
+    from .pipeline.scraper import scrape_page as _scrape_page
+except ImportError:
+    import sys
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+    from mcp_docs_server.pipeline.resolver import URLResolver
+    from mcp_docs_server.pipeline.scraper import scrape_page as _scrape_page
 
 mcp = FastMCP("docs-server")
-
 
 @mcp.tool()
 async def resolve_docs(

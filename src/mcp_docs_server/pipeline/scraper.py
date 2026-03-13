@@ -18,6 +18,20 @@ from crawl4ai.async_crawler_strategy import AsyncHTTPCrawlerStrategy
 
 logger = logging.getLogger(__name__)
 
+FALLBACK_SELECTORS = [
+    "article",
+    "main",
+    '[role="main"]',
+    ".content",
+    ".docs-content",
+    ".documentation",
+    ".markdown-body",
+    "#content",
+    "#main",
+]
+
+MIN_CONTENT_LENGTH = 200
+
 # ---------------------------------------------------------------------------
 # Shared configuration (module-level, created once)
 # ---------------------------------------------------------------------------
@@ -49,16 +63,36 @@ async def scrape_page(url: str, max_length: int = 50_000) -> dict:
         On failure the ``content`` key is empty and an ``error`` key is added.
     """
     try:
-        run_config = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            markdown_generator=DefaultMarkdownGenerator(),
-            verbose=False,
-        )
-
         async with AsyncWebCrawler(
             crawler_strategy=_http_strategy,
         ) as crawler:
-            result = await crawler.arun(url=url, config=run_config)
+            result = None
+
+            for selector in FALLBACK_SELECTORS:
+                run_config = CrawlerRunConfig(
+                    css_selector=selector,
+                    cache_mode=CacheMode.BYPASS,
+                    markdown_generator=DefaultMarkdownGenerator(),
+                    verbose=False,
+                )
+                candidate = await crawler.arun(url=url, config=run_config)
+                candidate_content = (
+                    getattr(candidate, "fit_markdown", None)
+                    or getattr(candidate, "markdown", None)
+                    or candidate.cleaned_html
+                    or ""
+                )
+                if candidate.success and len(candidate_content.strip()) >= MIN_CONTENT_LENGTH:
+                    result = candidate
+                    break
+
+            if result is None:
+                run_config = CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                    markdown_generator=DefaultMarkdownGenerator(),
+                    verbose=False,
+                )
+                result = await crawler.arun(url=url, config=run_config)
 
         if not result.success:
             logger.warning("Scrape failed for %s: %s", url, result.error_message)
