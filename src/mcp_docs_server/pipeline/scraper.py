@@ -10,11 +10,6 @@ from urllib.parse import urlparse
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 
 from ..config import settings
-import sys
-import io
-# Fix Windows CP1252 encoding crash from Crawl4AI's Rich logger
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 logger = logging.getLogger(__name__)
 
 
