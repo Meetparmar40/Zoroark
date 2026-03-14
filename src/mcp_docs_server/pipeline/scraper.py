@@ -1,111 +1,104 @@
-import asyncio
+"""Documentation scraper - second stage of the retrieval pipeline.
+
+Uses Crawl4AI to fetch and extract documentation content from a URL.
+"""
+
 import logging
+from typing import Any
+from urllib.parse import urlparse
 
-from crawl4ai import (
-    AsyncWebCrawler,
-    CacheMode,
-    CrawlerRunConfig,
-    DefaultMarkdownGenerator,
-    HTTPCrawlerConfig,
-)
-from crawl4ai.async_crawler_strategy import AsyncHTTPCrawlerStrategy
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 
+from ..config import settings
+import sys
+import io
+# Fix Windows CP1252 encoding crash from Crawl4AI's Rich logger
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 logger = logging.getLogger(__name__)
 
-FALLBACK_SELECTORS = [
-    "article",
-    "main",
-    '[role="main"]',
-    ".content",
-    ".docs-content",
-    ".documentation",
-    ".markdown-body",
-    "#content",
-    "#main",
-]
 
-MIN_CONTENT_LENGTH = 200
-
-_http_config = HTTPCrawlerConfig(
-    method="GET",
-    headers={
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    },
-    follow_redirects=True,
-    verify_ssl=True,
-)
-
-_http_strategy = AsyncHTTPCrawlerStrategy(browser_config=_http_config)
+class ScraperError(RuntimeError):
+	"""Raised when scraping fails or returns unusable content."""
 
 
-async def scrape_page(url: str, max_length: int = 50_000) -> dict:
-    """Scrape *url* and return ``{"url": ..., "content": ...}``.
+class Crawl4AIScraper:
+	"""Async Crawl4AI wrapper for fetching documentation pages."""
 
-    Args:
-        url: Full URL to scrape.
-        max_length: Truncate markdown content beyond this many characters.
+	def __init__(self) -> None:
+		self.browser_config = BrowserConfig(
+			headless=True,
+			verbose=False,
+		)
+		self.run_config = CrawlerRunConfig(
+			cache_mode=CacheMode.BYPASS,
+			page_timeout=settings.scraper_timeout_ms,
+		)
 
-    Returns:
-        Dict with ``url`` and ``content`` (markdown text).
-        On failure the ``content`` key is empty and an ``error`` key is added.
-    """
-    try:
-        async with AsyncWebCrawler(
-            crawler_strategy=_http_strategy,
-        ) as crawler:
-            result = None
+	async def scrape(self, url: str) -> str:
+		"""Scrape a URL and return markdown text.
 
-            for selector in FALLBACK_SELECTORS:
-                run_config = CrawlerRunConfig(
-                    css_selector=selector,
-                    cache_mode=CacheMode.BYPASS,
-                    markdown_generator=DefaultMarkdownGenerator(),
-                    verbose=False,
-                )
-                candidate = await crawler.arun(url=url, config=run_config)
-                candidate_content = (
-                    getattr(candidate, "fit_markdown", None)
-                    or getattr(candidate, "markdown", None)
-                    or candidate.cleaned_html
-                    or ""
-                )
-                if candidate.success and len(candidate_content.strip()) >= MIN_CONTENT_LENGTH:
-                    result = candidate
-                    break
+		Args:
+			url: Fully qualified URL for a documentation page.
 
-            if result is None:
-                run_config = CrawlerRunConfig(
-                    cache_mode=CacheMode.BYPASS,
-                    markdown_generator=DefaultMarkdownGenerator(),
-                    verbose=False,
-                )
-                result = await crawler.arun(url=url, config=run_config)
+		Returns:
+			Extracted markdown text.
+		"""
+		self._validate_url(url)
 
-        if not result.success:
-            logger.warning("Scrape failed for %s: %s", url, result.error_message)
-            return {
-                "url": url,
-                "content": "",
-                "error": result.error_message or "unknown",
-            }
+		logger.info("Scraping URL with Crawl4AI: %s", url)
 
-        # Prefer fit_markdown (cleaned) > markdown > cleaned_html
-        content = (
-            getattr(result, "fit_markdown", None)
-            or getattr(result, "markdown", None)
-            or result.cleaned_html
-            or ""
-        )
+		async with AsyncWebCrawler(config=self.browser_config) as crawler:
+			result = await crawler.arun(url=url, config=self.run_config)
 
-        if max_length and len(content) > max_length:
-            content = content[:max_length] + "\n\n... [truncated]"
+		if not getattr(result, "success", False):
+			error_message = getattr(result, "error_message", None) or "unknown crawler error"
+			raise ScraperError(f"Crawl4AI failed for {url}: {error_message}")
 
-        return {"url": url, "content": content}
+		markdown_text = self._extract_markdown_text(result)
+		if not markdown_text:
+			raise ScraperError(f"Crawl4AI returned empty content for {url}")
 
-    except Exception as e:
-        logger.error("Scrape exception for %s: %s", url, e)
-        return {"url": url, "content": "", "error": str(e)}
+		if settings.scraper_max_content_chars > 0:
+			markdown_text = markdown_text[: settings.scraper_max_content_chars]
+
+		return markdown_text
+
+	def _validate_url(self, url: str) -> None:
+		parsed = urlparse(url)
+		if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+			raise ScraperError(f"Invalid URL: {url}")
+
+	def _extract_markdown_text(self, result: Any) -> str:
+		markdown = getattr(result, "markdown", None)
+
+		if isinstance(markdown, str):
+			text = markdown
+		elif markdown is not None:
+			text = getattr(markdown, "raw_markdown", None) or getattr(markdown, "fit_markdown", None)
+		else:
+			text = None
+
+		if not text:
+			extracted_content = getattr(result, "extracted_content", None)
+			if isinstance(extracted_content, str):
+				text = extracted_content
+
+		return (text or "").strip()
 
 
+async def scrape_page(url: str) -> dict:
+	"""Scrape a docs page and return structured markdown content.
 
+	Args:
+		url: The full URL to scrape.
+
+	Returns:
+		Dict with `url` and `content`.
+	"""
+	scraper = Crawl4AIScraper()
+	content = await scraper.scrape(url)
+	return {
+		"url": url,
+		"content": content,
+	}

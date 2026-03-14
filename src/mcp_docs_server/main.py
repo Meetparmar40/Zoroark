@@ -1,5 +1,6 @@
 """MCP Documentation Server — exposes resolve_docs and scrape_page tools."""
 
+import os
 from typing import Optional
 from fastmcp import FastMCP
 
@@ -60,4 +61,9 @@ async def scrape_page(url: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="http", port=8000)
+    transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
+    if transport == "http":
+        port = int(os.getenv("MCP_PORT", "8000"))
+        mcp.run(transport="http", port=port)
+    else:
+        mcp.run(transport="stdio")
