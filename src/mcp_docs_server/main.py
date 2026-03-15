@@ -1,6 +1,10 @@
+import os
+
+os.environ["FASTMCP_LOG_LEVEL"] = "ERROR"
+os.environ["PYTHONUTF8"] = "1"
+
 """MCP Documentation Server — exposes resolve_docs and scrape_page tools."""
 
-import os
 from typing import Optional
 from fastmcp import FastMCP
 
@@ -59,6 +63,24 @@ async def scrape_page(url: str) -> dict:
     """
     return await _scrape_page(url)
 
+
+import sys
+# Proxy sys.stdout to sys.stderr to stop Crawl4AI and other libs from corrupting JSON-RPC,
+# but keep sys.stdout.buffer pointing to the real stdout so FastMCP can communicate.
+class StdoutProxy:
+    def __init__(self, original, target):
+        self.original = original
+        self.target = target
+        self.buffer = original.buffer
+    def write(self, s):
+        return self.target.write(s)
+    def flush(self):
+        self.target.flush()
+        self.original.flush()
+    def __getattr__(self, attr):
+        return getattr(self.original, attr)
+        
+sys.stdout = StdoutProxy(sys.stdout, sys.stderr)
 
 if __name__ == "__main__":
     transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()

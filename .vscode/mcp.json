@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "docs-server": {
+      "command": "python",
+      "args": ["-X", "utf8", "-m", "mcp_docs_server.main"],
+      "env": {
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
