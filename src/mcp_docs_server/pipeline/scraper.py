@@ -4,13 +4,56 @@ Uses Crawl4AI to fetch and extract documentation content from a URL.
 """
 
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+from crawl4ai.extraction_strategy import NoExtractionStrategy
 
 from ..config import settings
 logger = logging.getLogger(__name__)
+
+
+EXCLUDED_TAGS = [
+	"header",
+	"footer",
+	"nav",
+	"aside",
+	"script",
+	"style",
+	"noscript",
+	"form",
+	"button",
+	"svg",
+	"advertisement",
+]
+
+EXCLUDED_SELECTORS = ",".join(
+	[
+		".sidebar",
+		".toc",
+		".breadcrumb",
+		".pagination",
+		".feedback",
+		".cookie-banner",
+		"[role='banner']",
+		"[role='navigation']",
+		"[role='complementary']",
+		"[data-slot='sidebar']",
+		"#table-of-contents",
+		"#sidebar-content",
+	]
+)
+
+NOISE_LINE_PATTERNS = (
+	re.compile(r"^copy$", re.IGNORECASE),
+	re.compile(r"^edit this page$", re.IGNORECASE),
+	re.compile(r"^on this page$", re.IGNORECASE),
+	re.compile(r"^table of contents$", re.IGNORECASE),
+	re.compile(r"^was this page helpful\??$", re.IGNORECASE),
+)
+
 
 
 class ScraperError(RuntimeError):
@@ -28,6 +71,12 @@ class Crawl4AIScraper:
 		self.run_config = CrawlerRunConfig(
 			cache_mode=CacheMode.BYPASS,
 			page_timeout=settings.scraper_timeout_ms,
+			excluded_tags=EXCLUDED_TAGS,
+			excluded_selector=EXCLUDED_SELECTORS,
+			exclude_external_links=True,
+			exclude_social_media_links=True,
+			word_count_threshold=10,
+			extraction_strategy=NoExtractionStrategy(),
 		)
 
 	async def scrape(self, url: str) -> str:
@@ -79,7 +128,27 @@ class Crawl4AIScraper:
 			if isinstance(extracted_content, str):
 				text = extracted_content
 
-		return (text or "").strip()
+		return self._clean_markdown_text(text or "")
+
+	def _clean_markdown_text(self, text: str) -> str:
+		cleaned_lines: list[str] = []
+		previous_blank = False
+
+		for raw_line in text.splitlines():
+			line = raw_line.strip()
+			if not line:
+				if not previous_blank and cleaned_lines:
+					cleaned_lines.append("")
+				previous_blank = True
+				continue
+
+			if any(pattern.match(line) for pattern in NOISE_LINE_PATTERNS):
+				continue
+
+			cleaned_lines.append(line)
+			previous_blank = False
+
+		return "\n".join(cleaned_lines).strip()
 
 
 async def scrape_page(url: str) -> dict:
