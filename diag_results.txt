@@ -1,4 +1,0 @@
-1. config: OK
-2. resolver: OK
-3. scraper: OK
-4. main: OK (server name: docs-server)
